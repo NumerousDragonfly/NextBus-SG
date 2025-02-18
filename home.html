@@ -4,24 +4,144 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Bus Arrival Timing</title>
+    <script src="https://cdn.jsdelivr.net/npm/handlebars@latest/dist/handlebars.min.js"></script>
+    <style type="text/css">
+      .tftable {
+        font-size: 14px;
+        color: #333333;
+        width: 100%;
+        border-width: 1px;
+        border-color: #87ceeb;
+        border-collapse: collapse;
+      }
+      .tftable th {
+        font-size: 18px;
+        background-color: #87ceeb;
+        border-width: 1px;
+        padding: 8px;
+        border-style: solid;
+        border-color: #87ceeb;
+        text-align: left;
+      }
+      .tftable tr {
+        background-color: #ffffff;
+      }
+      .tftable td {
+        font-size: 16px;
+        border-width: 1px;
+        padding: 8px;
+        border-style: solid;
+        border-color: #87ceeb;
+      }
+      .tftable tr:hover {
+        background-color: #e0ffff;
+      }
+    </style>
   </head>
   <body>
     <h1>Bus Arrival Timing</h1>
-    <pre id="response"></pre>
-    <script>
-      const busStopCode = "03369";
-      const apiPath = "v3/BusArrival";
-      const queryParams = new URLSearchParams({ BusStopCode: busStopCode }).toString();
+    <label for="busStopCode">Enter Bus Stop Code:</label>
+    <input type="text" id="busStopCodeInput" />
+    <button onclick="fetchBusArrival()">Get Arrival Timing</button>
+    <br /><br />
 
-      fetch(`http://bus-arrival-timing.vercel.app/api/datamall?path=${apiPath}&${queryParams}`)
-        .then((response) => response.json())
-        .then((result) => {
-          document.getElementById("response").innerText = JSON.stringify(result, null, 2);
-        })
-        .catch((error) => {
-          console.error("There was a problem with the fetch operation:", error);
-          document.getElementById("response").innerText = "Error fetching data";
-        });
+    <script id="table-template" type="text/x-handlebars-template">
+      <table class="tftable" border="1">
+        <tr>
+          <th>Service No</th>
+          <th>Next Bus - Estimated Arrival</th>
+          <th>Next Bus 2 - Estimated Arrival</th>
+          <th>Next Bus 3 - Estimated Arrival</th>
+        </tr>
+        {{#each Services}}
+          <tr>
+            <td>{{ServiceNo}}</td>
+            <td>{{formatTime NextBus.EstimatedArrival}}</td>
+            <td>{{formatTime NextBus2.EstimatedArrival}}</td>
+            <td>{{formatTime NextBus3.EstimatedArrival}}</td>
+          </tr>
+        {{/each}}
+      </table>
     </script>
+
+    <script>
+      // Register Handlebars helper to format time
+      Handlebars.registerHelper("formatTime", function (time) {
+        if (!time) return "N/A";
+        const now = new Date();
+        const arrivalTime = new Date(time);
+        const diffInMinutes = Math.floor((arrivalTime - now) / 60000); // Round down to nearest minute
+        return diffInMinutes > 1 ? `${diffInMinutes} min` : diffInMinutes === 1 ? "1 min" : "Arr";
+      });
+
+      // Fetch bus arrival timing data
+      function fetchBusArrival() {
+        const busStopCode = document.getElementById("busStopCodeInput").value;
+        if (!busStopCode || !/^\d{5}$/.test(busStopCode)) {
+          alert("Please enter a valid 5-digit bus stop code.");
+          return;
+        }
+
+        const apiPath = "v3/BusArrival";
+        const queryParams = new URLSearchParams({ BusStopCode: busStopCode }).toString();
+
+        fetch(`http://bus-arrival-timing.vercel.app/api/datamall?path=${apiPath}&${queryParams}`)
+          .then((response) => {
+            if (!response.ok) {
+              throw new Error("Network error");
+            }
+            return response.json();
+          })
+          .then((result) => {
+            if (result.Services && result.Services.length > 0) {
+              const source = document.getElementById("table-template").innerHTML;
+              const template = Handlebars.compile(source);
+              const html = template(result);
+              document.getElementById("response").innerHTML = html;
+            } else {
+              fetchBusRoutes(busStopCode);
+            }
+          })
+          .catch((error) => {
+            console.error("There was a problem with the fetch operation:", error);
+            document.getElementById("response").innerText = "Error fetching data";
+          });
+      }
+
+      // Fetch bus routes data to determine opertating hours
+      function fetchBusRoutes(busStopCode) {
+        const apiPath = "BusRoutes";
+        const queryParams = new URLSearchParams({ BusStopCode: busStopCode }).toString();
+
+        fetch(`http://bus-arrival-timing.vercel.app/api/datamall?path=${apiPath}&${queryParams}`)
+          .then((response) => {
+            if (!response.ok) {
+              throw new Error("Network error");
+            }
+            return response.json();
+          })
+          .then((result) => {
+            const now = new Date();
+            const currentHour = now.getHours();
+            const currentMinutes = now.getMinutes();
+            const currentTime = currentHour * 100 + currentMinutes;
+
+            const isBusInOperation = result.value.some((route) => {
+              const firstBus = parseInt(route.WD_FirstBus, 10);
+              const lastBus = parseInt(route.WD_LastBus, 10);
+              return currentTime >= firstBus && currentTime <= lastBus;
+            });
+
+            const message = isBusInOperation ? "No Est. Available" : "Not In Operation";
+            document.getElementById("response").innerText = message;
+          })
+          .catch((error) => {
+            console.error("There was a problem with the fetch operation:", error);
+            document.getElementById("response").innerText = "Error fetching data";
+          });
+      }
+    </script>
+
+    <div id="response"></div>
   </body>
 </html>
